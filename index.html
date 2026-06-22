@@ -3,16 +3,18 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>60 Dunearn UPV Live Analysis</title>
+    <title>UPV Live Analysis</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <header class="topbar">
       <div>
-        <h1>60 Dunearn UPV Live Analysis</h1>
+        <h1>UPV Live Analysis</h1>
         <p>Enter 3 points x 3 UPV readings per location. Results update instantly.</p>
       </div>
       <div class="actions">
+        <button id="newSheetBtn" type="button">New sheet</button>
+        <button id="saveSheetBtn" type="button">Save sheet</button>
         <button id="addRowBtn" type="button">Add location</button>
         <button id="exportCsvBtn" type="button">Export CSV</button>
         <label class="fileButton">
@@ -24,6 +26,24 @@
     </header>
 
     <main>
+      <section class="setupPanel" aria-label="Project and sheet setup">
+        <label>
+          <span>Project Name</span>
+          <input id="projectNameInput" type="text" placeholder="e.g. Project / Building Name">
+        </label>
+        <label>
+          <span>Locations Tested</span>
+          <input id="locationCountInput" type="number" min="1" max="500" step="1">
+        </label>
+        <button id="applyLocationCountBtn" type="button">Update rows</button>
+        <label>
+          <span>Browse Saved Sheets</span>
+          <select id="sheetSelect"></select>
+        </label>
+        <button id="openSheetBtn" type="button">Open sheet</button>
+        <button id="deleteSheetBtn" type="button" class="danger">Delete sheet</button>
+      </section>
+
       <section class="summaryGrid" aria-label="UPV summary">
         <article class="metric">
           <span>Completed Locations</span>

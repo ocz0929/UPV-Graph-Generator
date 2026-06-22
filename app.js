@@ -1,47 +1,55 @@
 "use strict";
 
-const STORAGE_KEY = "upv-live-analysis-60-dunearn-v1";
+const WORKBOOK_KEY = "upv-live-analysis-workbook-v2";
+const LEGACY_KEY = "upv-live-analysis-60-dunearn-v1";
 const READING_KEYS = ["p1r1", "p1r2", "p1r3", "p2r1", "p2r2", "p2r3", "p3r1", "p3r2", "p3r3"];
 const META_KEYS = ["block", "level", "zone", "locationId", "remarks"];
 const CSV_HEADERS = [...META_KEYS, ...READING_KEYS];
-const GROUPS = [
-  ["C", "1st Storey", "C-L1"],
-  ["M", "1st Storey", "M-L1"],
-  ["C", "2nd Storey", "C-L2"],
-  ["M", "2nd Storey", "M-L2"],
-];
+const BLOCK_OPTIONS = ["A", "B", "C", "D", "M", "Other"];
+const LEVEL_OPTIONS = ["Basement", "1st Storey", "2nd Storey", "3rd Storey", "4th Storey", "5th Storey", "Roof"];
 
-let rows = loadRows();
+let workbook = loadWorkbook();
+let activeSheet = getActiveSheet();
+let rows = activeSheet.rows;
 let analysis = null;
 
-const tableBody = document.getElementById("tableBody");
-const lowestBody = document.getElementById("lowestBody");
-const groupBody = document.getElementById("groupBody");
-const saveStatus = document.getElementById("saveStatus");
+const els = {
+  projectName: document.getElementById("projectNameInput"),
+  locationCount: document.getElementById("locationCountInput"),
+  sheetSelect: document.getElementById("sheetSelect"),
+  tableBody: document.getElementById("tableBody"),
+  lowestBody: document.getElementById("lowestBody"),
+  groupBody: document.getElementById("groupBody"),
+  saveStatus: document.getElementById("saveStatus"),
+};
 
+document.getElementById("newSheetBtn").addEventListener("click", newSheet);
+document.getElementById("saveSheetBtn").addEventListener("click", () => saveActiveSheet("Saved"));
+document.getElementById("applyLocationCountBtn").addEventListener("click", applyLocationCount);
+document.getElementById("openSheetBtn").addEventListener("click", openSelectedSheet);
+document.getElementById("deleteSheetBtn").addEventListener("click", deleteSelectedSheet);
 document.getElementById("addRowBtn").addEventListener("click", addRow);
 document.getElementById("exportCsvBtn").addEventListener("click", exportCsv);
 document.getElementById("importCsvInput").addEventListener("change", importCsv);
 document.getElementById("clearBtn").addEventListener("click", clearReadings);
 document.getElementById("copyLowestBtn").addEventListener("click", copyLowest);
+els.projectName.addEventListener("input", updateProjectName);
+els.locationCount.addEventListener("change", applyLocationCount);
+els.sheetSelect.addEventListener("change", openSelectedSheet);
 
+hydrateControls();
+renderSheetList();
 renderTable();
 recalculate();
 
-function createDefaultRows() {
-  const seeded = [];
-  for (const [block, level, prefix] of GROUPS) {
-    for (let i = 1; i <= 30; i += 1) {
-      seeded.push(blankRow(block, level, `${prefix}-${String(i).padStart(2, "0")}`));
-    }
-  }
-  return seeded;
+function createId() {
+  return `sheet-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function blankRow(block = "C", level = "1st Storey", locationId = "") {
+function blankRow(locationId = "") {
   return {
-    block,
-    level,
+    block: "C",
+    level: "1st Storey",
     zone: "",
     locationId,
     remarks: "",
@@ -57,38 +65,212 @@ function blankRow(block = "C", level = "1st Storey", locationId = "") {
   };
 }
 
-function loadRows() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createDefaultRows();
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length ? parsed.map(normalizeRow) : createDefaultRows();
-  } catch {
-    return createDefaultRows();
-  }
-}
-
-function normalizeRow(row) {
-  const clean = blankRow();
-  for (const key of [...META_KEYS, ...READING_KEYS]) clean[key] = row[key] ?? "";
+function normalizeRow(row, index = 0) {
+  const clean = blankRow(`LOC-${String(index + 1).padStart(3, "0")}`);
+  for (const key of [...META_KEYS, ...READING_KEYS]) clean[key] = row?.[key] ?? clean[key] ?? "";
   clean.block = clean.block || "C";
   clean.level = clean.level || "1st Storey";
+  clean.locationId = clean.locationId || `LOC-${String(index + 1).padStart(3, "0")}`;
   return clean;
 }
 
-function saveRows() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-  saveStatus.textContent = `Autosaved ${new Date().toLocaleTimeString()}`;
+function createRows(count) {
+  const safeCount = clampLocationCount(count || 20);
+  return Array.from({ length: safeCount }, (_, index) => blankRow(`LOC-${String(index + 1).padStart(3, "0")}`));
+}
+
+function createSheet({ name = "Sheet 1", projectName = "", locationCount = 20, rows: sourceRows = null } = {}) {
+  const normalizedRows = sourceRows ? sourceRows.map(normalizeRow) : createRows(locationCount);
+  return {
+    id: createId(),
+    name,
+    projectName,
+    locationCount: normalizedRows.length,
+    rows: normalizedRows,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function loadWorkbook() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WORKBOOK_KEY) || "null");
+    if (saved?.sheets?.length) {
+      saved.sheets = saved.sheets.map((sheet, index) => ({
+        id: sheet.id || createId(),
+        name: sheet.name || `Sheet ${index + 1}`,
+        projectName: sheet.projectName || "",
+        locationCount: Number(sheet.locationCount) || sheet.rows?.length || 20,
+        rows: (sheet.rows?.length ? sheet.rows : createRows(sheet.locationCount || 20)).map(normalizeRow),
+        updatedAt: sheet.updatedAt || new Date().toISOString(),
+      }));
+      saved.activeSheetId = saved.sheets.some((sheet) => sheet.id === saved.activeSheetId)
+        ? saved.activeSheetId
+        : saved.sheets[0].id;
+      return saved;
+    }
+  } catch {
+    // Fall through to migration/default.
+  }
+
+  try {
+    const legacyRows = JSON.parse(localStorage.getItem(LEGACY_KEY) || "null");
+    if (Array.isArray(legacyRows) && legacyRows.length) {
+      const migrated = createSheet({
+        name: "Migrated Sheet",
+        projectName: "",
+        rows: legacyRows,
+      });
+      return { activeSheetId: migrated.id, sheets: [migrated] };
+    }
+  } catch {
+    // Fall through to default.
+  }
+
+  const first = createSheet({ name: "Sheet 1", projectName: "", locationCount: 20 });
+  return { activeSheetId: first.id, sheets: [first] };
+}
+
+function persistWorkbook(message = "Autosaved") {
+  localStorage.setItem(WORKBOOK_KEY, JSON.stringify(workbook));
+  els.saveStatus.textContent = `${message} ${new Date().toLocaleTimeString()}`;
+}
+
+function getActiveSheet() {
+  return workbook.sheets.find((sheet) => sheet.id === workbook.activeSheetId) || workbook.sheets[0];
+}
+
+function refreshActiveReferences() {
+  activeSheet = getActiveSheet();
+  rows = activeSheet.rows;
+}
+
+function hydrateControls() {
+  refreshActiveReferences();
+  els.projectName.value = activeSheet.projectName || "";
+  els.locationCount.value = String(activeSheet.locationCount || activeSheet.rows.length);
+  document.title = activeSheet.projectName ? `${activeSheet.projectName} - UPV Live Analysis` : "UPV Live Analysis";
+}
+
+function renderSheetList() {
+  els.sheetSelect.innerHTML = "";
+  for (const sheet of workbook.sheets) {
+    const option = document.createElement("option");
+    option.value = sheet.id;
+    option.textContent = `${sheet.name}${sheet.projectName ? ` - ${sheet.projectName}` : ""}`;
+    els.sheetSelect.appendChild(option);
+  }
+  els.sheetSelect.value = activeSheet.id;
+}
+
+function saveActiveSheet(message = "Autosaved") {
+  activeSheet.rows = rows;
+  activeSheet.locationCount = rows.length;
+  activeSheet.projectName = els.projectName.value.trim();
+  activeSheet.updatedAt = new Date().toISOString();
+  if (!activeSheet.name || activeSheet.name.startsWith("Sheet ")) {
+    activeSheet.name = activeSheet.projectName || activeSheet.name || "Sheet";
+  }
+  persistWorkbook(message);
+  renderSheetList();
+}
+
+function updateProjectName() {
+  activeSheet.projectName = els.projectName.value.trim();
+  if (activeSheet.projectName) activeSheet.name = activeSheet.projectName;
+  document.title = activeSheet.projectName ? `${activeSheet.projectName} - UPV Live Analysis` : "UPV Live Analysis";
+  saveActiveSheet("Autosaved");
+}
+
+function clampLocationCount(value) {
+  const number = Math.floor(Number(value));
+  if (!Number.isFinite(number)) return 1;
+  return Math.min(500, Math.max(1, number));
+}
+
+function rowHasData(row) {
+  return [...READING_KEYS, "remarks", "zone"].some((key) => String(row[key] ?? "").trim() !== "");
+}
+
+function applyLocationCount() {
+  const nextCount = clampLocationCount(els.locationCount.value);
+  if (nextCount < rows.length && rows.slice(nextCount).some(rowHasData)) {
+    if (!confirm(`This will remove ${rows.length - nextCount} row(s), including rows with data. Continue?`)) {
+      els.locationCount.value = String(rows.length);
+      return;
+    }
+  }
+  if (nextCount > rows.length) {
+    const start = rows.length;
+    for (let i = start; i < nextCount; i += 1) rows.push(blankRow(`LOC-${String(i + 1).padStart(3, "0")}`));
+  } else if (nextCount < rows.length) {
+    rows = rows.slice(0, nextCount);
+    activeSheet.rows = rows;
+  }
+  activeSheet.locationCount = nextCount;
+  els.locationCount.value = String(nextCount);
+  renderTable();
+  recalculate();
+  saveActiveSheet("Rows updated");
+}
+
+function newSheet() {
+  const projectName = prompt("Project name for the new sheet:", "");
+  if (projectName === null) return;
+  const countInput = prompt("How many locations tested?", "20");
+  if (countInput === null) return;
+  const count = clampLocationCount(countInput);
+  const sheet = createSheet({
+    name: projectName.trim() || `Sheet ${workbook.sheets.length + 1}`,
+    projectName: projectName.trim(),
+    locationCount: count,
+  });
+  workbook.sheets.push(sheet);
+  workbook.activeSheetId = sheet.id;
+  refreshActiveReferences();
+  hydrateControls();
+  renderSheetList();
+  renderTable();
+  recalculate();
+  persistWorkbook("New sheet created");
+}
+
+function openSelectedSheet() {
+  const id = els.sheetSelect.value;
+  if (!workbook.sheets.some((sheet) => sheet.id === id)) return;
+  workbook.activeSheetId = id;
+  refreshActiveReferences();
+  hydrateControls();
+  renderSheetList();
+  renderTable();
+  recalculate();
+  persistWorkbook("Opened");
+}
+
+function deleteSelectedSheet() {
+  if (workbook.sheets.length <= 1) {
+    alert("At least one sheet must remain.");
+    return;
+  }
+  const selected = workbook.sheets.find((sheet) => sheet.id === els.sheetSelect.value);
+  if (!selected) return;
+  if (!confirm(`Delete saved sheet "${selected.name}"?`)) return;
+  workbook.sheets = workbook.sheets.filter((sheet) => sheet.id !== selected.id);
+  workbook.activeSheetId = workbook.sheets[0].id;
+  refreshActiveReferences();
+  hydrateControls();
+  renderSheetList();
+  renderTable();
+  recalculate();
+  persistWorkbook("Sheet deleted");
 }
 
 function renderTable() {
-  tableBody.innerHTML = "";
+  els.tableBody.innerHTML = "";
   rows.forEach((row, index) => {
     const tr = document.createElement("tr");
     tr.dataset.index = String(index);
-
-    tr.appendChild(selectCell(index, "block", ["C", "M"]));
-    tr.appendChild(selectCell(index, "level", ["1st Storey", "2nd Storey"]));
+    tr.appendChild(selectCell(index, "block", BLOCK_OPTIONS));
+    tr.appendChild(selectCell(index, "level", LEVEL_OPTIONS));
     tr.appendChild(inputCell(index, "zone", "text"));
     tr.appendChild(inputCell(index, "locationId", "text"));
     for (const key of READING_KEYS) tr.appendChild(inputCell(index, key, "number"));
@@ -100,8 +282,7 @@ function renderTable() {
     tr.appendChild(outputCell("cv"));
     tr.appendChild(outputCell("rank", "rankCell"));
     tr.appendChild(inputCell(index, "remarks", "text"));
-
-    tableBody.appendChild(tr);
+    els.tableBody.appendChild(tr);
   });
 }
 
@@ -111,10 +292,16 @@ function selectCell(rowIndex, key, options) {
   const select = document.createElement("select");
   select.dataset.row = String(rowIndex);
   select.dataset.key = key;
-  for (const optionValue of options) {
+  for (const value of options) {
     const option = document.createElement("option");
-    option.value = optionValue;
-    option.textContent = optionValue;
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  }
+  if (!options.includes(rows[rowIndex][key])) {
+    const option = document.createElement("option");
+    option.value = rows[rowIndex][key];
+    option.textContent = rows[rowIndex][key];
     select.appendChild(option);
   }
   select.value = rows[rowIndex][key];
@@ -125,7 +312,7 @@ function selectCell(rowIndex, key, options) {
 
 function inputCell(rowIndex, key, type) {
   const td = document.createElement("td");
-  td.className = READING_KEYS.includes(key) || META_KEYS.includes(key) ? "inputCell" : "";
+  td.className = "inputCell";
   const input = document.createElement("input");
   input.dataset.row = String(rowIndex);
   input.dataset.key = key;
@@ -154,26 +341,29 @@ function updateValue(event) {
   const key = element.dataset.key;
   rows[rowIndex][key] = element.value;
   recalculate();
-  saveRows();
+  saveActiveSheet("Autosaved");
 }
 
 function addRow() {
-  rows.push(blankRow("C", "1st Storey", `NEW-${String(rows.length + 1).padStart(3, "0")}`));
+  rows.push(blankRow(`LOC-${String(rows.length + 1).padStart(3, "0")}`));
+  activeSheet.locationCount = rows.length;
+  els.locationCount.value = String(rows.length);
   renderTable();
   recalculate();
-  saveRows();
+  saveActiveSheet("Location added");
 }
 
 function clearReadings() {
-  if (!confirm("Clear all UPV readings and remarks? Location IDs will remain.")) return;
+  if (!confirm("Clear all UPV readings and remarks in this sheet? Location IDs will remain.")) return;
   rows = rows.map((row) => {
     const next = { ...row, remarks: "" };
     for (const key of READING_KEYS) next[key] = "";
     return next;
   });
+  activeSheet.rows = rows;
   renderTable();
   recalculate();
-  saveRows();
+  saveActiveSheet("Readings cleared");
 }
 
 function readNumber(value) {
@@ -183,7 +373,7 @@ function readNumber(value) {
 }
 
 function avg(values) {
-  const numeric = values.filter((value) => value !== null);
+  const numeric = values.filter((value) => value !== null && value !== undefined && !Number.isNaN(value));
   if (!numeric.length) return null;
   return numeric.reduce((sum, value) => sum + value, 0) / numeric.length;
 }
@@ -195,7 +385,7 @@ function avgIfComplete(values, requiredCount) {
 }
 
 function sampleSd(values) {
-  const numeric = values.filter((value) => value !== null);
+  const numeric = values.filter((value) => value !== null && value !== undefined && !Number.isNaN(value));
   if (numeric.length < 2) return null;
   const mean = avg(numeric);
   const variance = numeric.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (numeric.length - 1);
@@ -227,33 +417,25 @@ function recalculate() {
   const completed = computedRows
     .filter((row) => row.locationAvg !== null)
     .sort((a, b) => a.locationAvg - b.locationAvg || a.index - b.index);
-
   completed.forEach((row, index) => {
     row.rank = index + 1;
   });
 
   const values = completed.map((row) => row.locationAvg).sort((a, b) => a - b);
-  const mean = avg(values);
-  const sd = sampleSd(values);
-  const median = percentile(values, 0.5);
-  const p25 = percentile(values, 0.25);
-  const p75 = percentile(values, 0.75);
-  const r2 = normalPlotR2(values, mean, sd);
-
   analysis = {
     rows: computedRows,
     completed,
     lowestFive: completed.slice(0, 5),
     stats: {
       count: completed.length,
-      mean,
-      median,
-      sd,
-      p25,
-      p75,
+      mean: avg(values),
+      median: percentile(values, 0.5),
+      sd: sampleSd(values),
+      p25: percentile(values, 0.25),
+      p75: percentile(values, 0.75),
       min: values[0] ?? null,
       max: values[values.length - 1] ?? null,
-      r2,
+      r2: normalPlotR2(values, avg(values), sampleSd(values)),
     },
   };
 
@@ -265,10 +447,9 @@ function recalculate() {
 }
 
 function updateTableOutputs() {
-  const rowElements = [...tableBody.querySelectorAll("tr")];
+  const rowElements = [...els.tableBody.querySelectorAll("tr")];
   for (const tr of rowElements) {
-    const index = Number(tr.dataset.index);
-    const row = analysis.rows[index];
+    const row = analysis.rows[Number(tr.dataset.index)];
     tr.classList.toggle("lowest", row.rank !== null && row.rank <= 5);
     tr.querySelector('[data-output="p1Avg"]').textContent = formatNumber(row.p1);
     tr.querySelector('[data-output="p2Avg"]').textContent = formatNumber(row.p2);
@@ -293,15 +474,14 @@ function updateSummary() {
 }
 
 function updateLowest() {
-  lowestBody.innerHTML = "";
+  els.lowestBody.innerHTML = "";
   if (!analysis.lowestFive.length) {
     const tr = document.createElement("tr");
     tr.className = "emptyRow";
     tr.innerHTML = '<td colspan="5">Enter complete 9-reading locations to generate the coring shortlist.</td>';
-    lowestBody.appendChild(tr);
+    els.lowestBody.appendChild(tr);
     return;
   }
-
   for (const row of analysis.lowestFive) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -311,17 +491,27 @@ function updateLowest() {
       <td>${escapeHtml(row.level)}</td>
       <td>${formatNumber(row.locationAvg)}</td>
     `;
-    lowestBody.appendChild(tr);
+    els.lowestBody.appendChild(tr);
   }
 }
 
 function updateGroups() {
-  groupBody.innerHTML = "";
-  const groupNames = GROUPS.map(([block, level]) => `${block} / ${level}`);
-  for (const groupName of groupNames) {
-    const [block, level] = groupName.split(" / ");
-    const groupRows = analysis.completed.filter((row) => row.block === block && row.level === level);
-    const values = groupRows.map((row) => row.locationAvg);
+  els.groupBody.innerHTML = "";
+  const groups = new Map();
+  for (const row of analysis.completed) {
+    const key = `${row.block} / ${row.level}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row.locationAvg);
+  }
+  const sorted = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  if (!sorted.length) {
+    const tr = document.createElement("tr");
+    tr.className = "emptyRow";
+    tr.innerHTML = '<td colspan="4">No completed locations yet.</td>';
+    els.groupBody.appendChild(tr);
+    return;
+  }
+  for (const [groupName, values] of sorted) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${escapeHtml(groupName)}</td>
@@ -329,7 +519,7 @@ function updateGroups() {
       <td>${formatNumber(avg(values))}</td>
       <td>${formatNumber(sampleSd(values))}</td>
     `;
-    groupBody.appendChild(tr);
+    els.groupBody.appendChild(tr);
   }
 }
 
@@ -462,7 +652,7 @@ function canvasSetup(id) {
   canvas.width = Math.max(1, Math.floor(rect.width * ratio));
   canvas.height = Math.max(1, Math.floor(rect.height * ratio));
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  return { canvas, ctx, width: rect.width, height: rect.height };
+  return { ctx, width: rect.width, height: rect.height };
 }
 
 function clearChart(ctx, width, height, message) {
@@ -492,20 +682,15 @@ function drawHistogram(values) {
     document.getElementById("histNote").textContent = "Waiting for readings";
     return;
   }
-
   const bins = getBins(values);
-  const mean = analysis.stats.mean;
-  const sd = analysis.stats.sd;
   const maxCount = Math.max(1, ...bins.map((bin) => bin.count));
   const plot = { left: 48, right: width - 18, top: 22, bottom: height - 42 };
   const xScale = (x) => plot.left + ((x - bins[0].lower) / (bins[bins.length - 1].upper - bins[0].lower)) * (plot.right - plot.left);
   const yScale = (y) => plot.bottom - (y / maxCount) * (plot.bottom - plot.top);
-
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   drawAxes(ctx, plot);
-
   for (const bin of bins) {
     const x0 = xScale(bin.lower) + 2;
     const x1 = xScale(bin.upper) - 2;
@@ -513,15 +698,14 @@ function drawHistogram(values) {
     ctx.fillStyle = "#0f766e";
     ctx.fillRect(x0, y, Math.max(2, x1 - x0), plot.bottom - y);
   }
-
-  if (sd && sd > 0) {
+  if (analysis.stats.sd && analysis.stats.sd > 0) {
     ctx.strokeStyle = "#e87532";
     ctx.lineWidth = 2;
     ctx.beginPath();
     const step = (bins[bins.length - 1].upper - bins[0].lower) / 100;
     for (let i = 0; i <= 100; i += 1) {
       const xValue = bins[0].lower + step * i;
-      const expected = normalPdf(xValue, mean, sd) * values.length * (bins[0].upper - bins[0].lower);
+      const expected = normalPdf(xValue, analysis.stats.mean, analysis.stats.sd) * values.length * (bins[0].upper - bins[0].lower);
       const x = xScale(xValue);
       const y = yScale(expected);
       if (i === 0) ctx.moveTo(x, y);
@@ -529,7 +713,6 @@ function drawHistogram(values) {
     }
     ctx.stroke();
   }
-
   drawChartLabels(ctx, plot, bins[0].lower, bins[bins.length - 1].upper, maxCount, "UPV", "Count");
   document.getElementById("histNote").textContent = `${values.length} completed location${values.length === 1 ? "" : "s"}`;
 }
@@ -541,7 +724,6 @@ function drawCdf(values) {
     document.getElementById("cdfNote").textContent = "Waiting for readings";
     return;
   }
-
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 0.5;
@@ -550,12 +732,10 @@ function drawCdf(values) {
   const plot = { left: 48, right: width - 18, top: 22, bottom: height - 42 };
   const xScale = (x) => plot.left + ((x - xMin) / (xMax - xMin)) * (plot.right - plot.left);
   const yScale = (y) => plot.bottom - y * (plot.bottom - plot.top);
-
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   drawAxes(ctx, plot);
-
   ctx.strokeStyle = "#0f766e";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -566,7 +746,6 @@ function drawCdf(values) {
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
-
   if (analysis.stats.sd && analysis.stats.sd > 0) {
     ctx.strokeStyle = "#e87532";
     ctx.beginPath();
@@ -580,7 +759,6 @@ function drawCdf(values) {
     }
     ctx.stroke();
   }
-
   drawChartLabels(ctx, plot, xMin, xMax, 1, "UPV", "Cumulative");
   document.getElementById("cdfNote").textContent = "Observed line compared with normal CDF";
 }
@@ -592,24 +770,19 @@ function drawQq(values) {
     document.getElementById("qqNote").textContent = "R-squared updates after 3 completed locations";
     return;
   }
-
   const expected = values.map((_, i) => inverseNormal((i + 0.5) / values.length, analysis.stats.mean, analysis.stats.sd));
-  const allX = expected;
-  const allY = values;
-  const min = Math.min(...allX, ...allY);
-  const max = Math.max(...allX, ...allY);
+  const min = Math.min(...expected, ...values);
+  const max = Math.max(...expected, ...values);
   const span = max - min || 0.5;
   const xMin = min - span * 0.08;
   const xMax = max + span * 0.08;
   const plot = { left: 54, right: width - 24, top: 24, bottom: height - 44 };
   const xScale = (x) => plot.left + ((x - xMin) / (xMax - xMin)) * (plot.right - plot.left);
   const yScale = (y) => plot.bottom - ((y - xMin) / (xMax - xMin)) * (plot.bottom - plot.top);
-
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   drawAxes(ctx, plot);
-
   ctx.strokeStyle = "#b6c4ca";
   ctx.setLineDash([5, 4]);
   ctx.beginPath();
@@ -617,16 +790,12 @@ function drawQq(values) {
   ctx.lineTo(xScale(xMax), yScale(xMax));
   ctx.stroke();
   ctx.setLineDash([]);
-
   ctx.fillStyle = "#0f766e";
   expected.forEach((xValue, index) => {
-    const x = xScale(xValue);
-    const y = yScale(values[index]);
     ctx.beginPath();
-    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+    ctx.arc(xScale(xValue), yScale(values[index]), 3.5, 0, Math.PI * 2);
     ctx.fill();
   });
-
   drawChartLabels(ctx, plot, xMin, xMax, xMax, "Expected normal quantile", "Actual sorted UPV");
   document.getElementById("qqNote").textContent = `R-squared ${formatNumber(analysis.stats.r2, 3)}`;
 }
@@ -649,15 +818,22 @@ function drawChartLabels(ctx, plot, xMin, xMax, yMax, xLabel, yLabel) {
 }
 
 function exportCsv() {
-  const lines = [CSV_HEADERS.join(",")];
-  for (const row of rows) {
-    lines.push(CSV_HEADERS.map((key) => csvEscape(row[key])).join(","));
-  }
+  const metadata = [
+    ["projectName", activeSheet.projectName || ""],
+    ["sheetName", activeSheet.name || ""],
+    ["locationCount", String(rows.length)],
+  ];
+  const lines = [
+    ...metadata.map((line) => line.map(csvEscape).join(",")),
+    CSV_HEADERS.join(","),
+    ...rows.map((row) => CSV_HEADERS.map((key) => csvEscape(row[key])).join(",")),
+  ];
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
+  const safeName = (activeSheet.projectName || activeSheet.name || "UPV").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
   link.href = url;
-  link.download = "60_Dunearn_UPV_Live_Data.csv";
+  link.download = `${safeName || "UPV"}_Live_Data.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -680,14 +856,10 @@ function parseCsv(text) {
       if (char === '"' && next === '"') {
         cell += '"';
         i += 1;
-      } else if (char === '"') {
-        quoted = false;
-      } else {
-        cell += char;
-      }
-    } else if (char === '"') {
-      quoted = true;
-    } else if (char === ",") {
+      } else if (char === '"') quoted = false;
+      else cell += char;
+    } else if (char === '"') quoted = true;
+    else if (char === ",") {
       row.push(cell);
       cell = "";
     } else if (char === "\n") {
@@ -695,9 +867,7 @@ function parseCsv(text) {
       rowsOut.push(row);
       row = [];
       cell = "";
-    } else if (char !== "\r") {
-      cell += char;
-    }
+    } else if (char !== "\r") cell += char;
   }
   row.push(cell);
   rowsOut.push(row);
@@ -709,19 +879,32 @@ async function importCsv(event) {
   if (!file) return;
   const text = await file.text();
   const parsed = parseCsv(text);
-  const headers = parsed[0] || [];
-  const nextRows = parsed.slice(1).map((line) => {
-    const row = blankRow();
-    headers.forEach((header, index) => {
-      if (CSV_HEADERS.includes(header)) row[header] = line[index] ?? "";
+  let projectName = activeSheet.projectName;
+  let sheetName = activeSheet.name;
+  let headerIndex = parsed.findIndex((line) => CSV_HEADERS.every((header, index) => line[index] === header));
+  if (headerIndex < 0) headerIndex = 0;
+  for (const line of parsed.slice(0, headerIndex)) {
+    if (line[0] === "projectName") projectName = line[1] || projectName;
+    if (line[0] === "sheetName") sheetName = line[1] || sheetName;
+  }
+  const headers = parsed[headerIndex] || [];
+  const importedRows = parsed.slice(headerIndex + 1).map((line, index) => {
+    const row = blankRow(`LOC-${String(index + 1).padStart(3, "0")}`);
+    headers.forEach((header, columnIndex) => {
+      if (CSV_HEADERS.includes(header)) row[header] = line[columnIndex] ?? "";
     });
-    return normalizeRow(row);
+    return normalizeRow(row, index);
   });
-  if (nextRows.length) {
-    rows = nextRows;
+  if (importedRows.length) {
+    rows = importedRows;
+    activeSheet.rows = rows;
+    activeSheet.locationCount = rows.length;
+    activeSheet.projectName = projectName;
+    activeSheet.name = sheetName || projectName || activeSheet.name;
+    hydrateControls();
     renderTable();
     recalculate();
-    saveRows();
+    saveActiveSheet("CSV imported");
   }
   event.target.value = "";
 }
@@ -731,7 +914,12 @@ async function copyLowest() {
   for (const row of analysis.lowestFive) {
     lines.push([row.rank, row.locationId, row.block, row.level, formatNumber(row.locationAvg)]);
   }
-  await navigator.clipboard.writeText(lines.map((line) => line.join("\t")).join("\n"));
+  try {
+    await navigator.clipboard.writeText(lines.map((line) => line.join("\t")).join("\n"));
+    els.saveStatus.textContent = `Lowest 5 copied ${new Date().toLocaleTimeString()}`;
+  } catch {
+    alert(lines.map((line) => line.join("\t")).join("\n"));
+  }
 }
 
 window.addEventListener("resize", () => {

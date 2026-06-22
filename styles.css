@@ -97,6 +97,36 @@ main {
   padding: 18px;
 }
 
+.setupPanel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) 150px auto minmax(220px, 1fr) auto auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.setupPanel label {
+  display: grid;
+  gap: 5px;
+}
+
+.setupPanel span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.setupPanel input,
+.setupPanel select {
+  height: 34px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+}
+
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(8, minmax(120px, 1fr));
@@ -310,6 +340,10 @@ canvas {
     grid-template-columns: repeat(4, minmax(120px, 1fr));
   }
 
+  .setupPanel {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+
   .chartsGrid {
     grid-template-columns: 1fr;
   }
@@ -322,5 +356,9 @@ canvas {
 
   .summaryGrid {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .setupPanel {
+    grid-template-columns: 1fr;
   }
 }
