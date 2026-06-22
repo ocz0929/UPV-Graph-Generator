@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>60 Dunearn UPV Live Analysis</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>60 Dunearn UPV Live Analysis</h1>
+        <p>Enter 3 points x 3 UPV readings per location. Results update instantly.</p>
+      </div>
+      <div class="actions">
+        <button id="addRowBtn" type="button">Add location</button>
+        <button id="exportCsvBtn" type="button">Export CSV</button>
+        <label class="fileButton">
+          Import CSV
+          <input id="importCsvInput" type="file" accept=".csv,text/csv">
+        </label>
+        <button id="clearBtn" type="button" class="danger">Clear readings</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="summaryGrid" aria-label="UPV summary">
+        <article class="metric">
+          <span>Completed Locations</span>
+          <strong id="completedCount">0</strong>
+        </article>
+        <article class="metric">
+          <span>Mean UPV</span>
+          <strong id="meanValue">-</strong>
+        </article>
+        <article class="metric">
+          <span>Median UPV</span>
+          <strong id="medianValue">-</strong>
+        </article>
+        <article class="metric">
+          <span>Std Dev</span>
+          <strong id="sdValue">-</strong>
+        </article>
+        <article class="metric">
+          <span>25th Percentile</span>
+          <strong id="p25Value">-</strong>
+        </article>
+        <article class="metric">
+          <span>75th Percentile</span>
+          <strong id="p75Value">-</strong>
+        </article>
+        <article class="metric">
+          <span>Normal Plot R-squared</span>
+          <strong id="r2Value">-</strong>
+        </article>
+        <article class="metric">
+          <span>Lowest Avg</span>
+          <strong id="minValue">-</strong>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="sidePanel" aria-label="Coring and group summaries">
+          <div class="panelHeader">
+            <h2>Lowest 5 for Coring</h2>
+            <button id="copyLowestBtn" type="button">Copy</button>
+          </div>
+          <table class="compactTable">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Location</th>
+                <th>Block</th>
+                <th>Level</th>
+                <th>Avg</th>
+              </tr>
+            </thead>
+            <tbody id="lowestBody"></tbody>
+          </table>
+
+          <h2 class="spaced">By Block / Level</h2>
+          <table class="compactTable">
+            <thead>
+              <tr>
+                <th>Group</th>
+                <th>Count</th>
+                <th>Mean</th>
+                <th>SD</th>
+              </tr>
+            </thead>
+            <tbody id="groupBody"></tbody>
+          </table>
+        </aside>
+
+        <section class="dataPanel">
+          <div class="panelHeader">
+            <h2>UPV Input Table</h2>
+            <div class="status" id="saveStatus">Autosaved locally</div>
+          </div>
+          <div class="tableWrap">
+            <table id="upvTable">
+              <thead>
+                <tr>
+                  <th rowspan="2">Block</th>
+                  <th rowspan="2">Level</th>
+                  <th rowspan="2">Plan / Zone</th>
+                  <th rowspan="2">Location ID</th>
+                  <th colspan="3">Point 1</th>
+                  <th colspan="3">Point 2</th>
+                  <th colspan="3">Point 3</th>
+                  <th rowspan="2">P1 Avg</th>
+                  <th rowspan="2">P2 Avg</th>
+                  <th rowspan="2">P3 Avg</th>
+                  <th rowspan="2">Location Avg</th>
+                  <th rowspan="2">SD</th>
+                  <th rowspan="2">CV</th>
+                  <th rowspan="2">Rank</th>
+                  <th rowspan="2">Remarks</th>
+                </tr>
+                <tr>
+                  <th>R1</th>
+                  <th>R2</th>
+                  <th>R3</th>
+                  <th>R1</th>
+                  <th>R2</th>
+                  <th>R3</th>
+                  <th>R1</th>
+                  <th>R2</th>
+                  <th>R3</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="chartsGrid">
+        <article class="chartPanel">
+          <div class="panelHeader">
+            <h2>Normal Distribution</h2>
+            <span id="histNote">Waiting for readings</span>
+          </div>
+          <canvas id="histCanvas" width="760" height="320" aria-label="Histogram and normal distribution chart"></canvas>
+        </article>
+        <article class="chartPanel">
+          <div class="panelHeader">
+            <h2>Cumulative Distribution</h2>
+            <span id="cdfNote">Waiting for readings</span>
+          </div>
+          <canvas id="cdfCanvas" width="760" height="320" aria-label="Observed cumulative distribution and normal CDF chart"></canvas>
+        </article>
+        <article class="chartPanel wide">
+          <div class="panelHeader">
+            <h2>Normal Probability Plot</h2>
+            <span id="qqNote">R-squared updates after 3 completed locations</span>
+          </div>
+          <canvas id="qqCanvas" width="1540" height="320" aria-label="Normal probability plot"></canvas>
+        </article>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
